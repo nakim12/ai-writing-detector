@@ -13,154 +13,146 @@ execute:
   message: false
 ---
 
-```{python}
+```{r}
 #| label: setup
-import sys
-from pathlib import Path
+here::i_am("notebooks/04-model-comparison.qmd")
 
-PROJECT_ROOT = Path.cwd().parent if Path.cwd().name == "notebooks" else Path.cwd()
-sys.path.append(str(PROJECT_ROOT))
+source(here::here("R", "features.R"))
+source(here::here("R", "evaluation.R"))
 
-import joblib
-import matplotlib.pyplot as plt
-import numpy as np
-import pandas as pd
-import seaborn as sns
-from sklearn.ensemble import GradientBoostingClassifier
-from sklearn.linear_model import LogisticRegression
-from sklearn.model_selection import GridSearchCV
-from sklearn.naive_bayes import MultinomialNB
-from sklearn.pipeline import Pipeline
-from sklearn.svm import LinearSVC
+library(tidyverse)
+library(tidymodels)
+library(textrecipes)
+library(discrim)
+library(vip)
 
-from src.features import build_tfidf_vectorizer
-from src.evaluation import cv_summary, stratified_cv, test_set_report
-
-sns.set_theme(style="whitegrid")
+tidymodels_prefer()
 ```
 
-## Load processed train/test splits
+## Load processed train / test data
 
-```{python}
-train_df = pd.read_csv(PROJECT_ROOT / "data" / "processed" / "train.csv")
-test_df = pd.read_csv(PROJECT_ROOT / "data" / "processed" / "test.csv")
-X_train, y_train = train_df["text"], train_df["generated"]
-X_test, y_test = test_df["text"], test_df["generated"]
+```{r}
+train_df <- readr::read_csv(
+  here::here("data", "processed", "train.csv"),
+  show_col_types = FALSE
+) |>
+  mutate(generated = factor(generated, levels = c("human", "ai")))
+
+test_df <- readr::read_csv(
+  here::here("data", "processed", "test.csv"),
+  show_col_types = FALSE
+) |>
+  mutate(generated = factor(generated, levels = c("human", "ai")))
 ```
 
 ## Compare candidate models with shared CV folds
 
-Every model uses the **same** stratified folds so the comparison is fair.
+Every workflow uses the **same** stratified folds and the **same** TF-IDF
+recipe, so the comparison is fair.
 
-```{python}
-candidates = {
-    "logreg": Pipeline([
-        ("tfidf", build_tfidf_vectorizer()),
-        ("clf", LogisticRegression(max_iter=1000, n_jobs=-1)),
-    ]),
-    "naive_bayes": Pipeline([
-        ("tfidf", build_tfidf_vectorizer()),
-        ("clf", MultinomialNB()),
-    ]),
-    "linear_svm": Pipeline([
-        ("tfidf", build_tfidf_vectorizer()),
-        ("clf", LinearSVC()),
-    ]),
-    "gboost": Pipeline([
-        ("tfidf", build_tfidf_vectorizer(max_features=5000)),
-        ("clf", GradientBoostingClassifier(random_state=42)),
-    ]),
-}
+```{r}
+folds <- cv_folds(train_df)
+rec_tfidf <- tfidf_recipe(generated ~ text, data = train_df)
 
-cv = stratified_cv()
-results = {name: cv_summary(model, X_train, y_train, cv=cv) for name, model in candidates.items()}
-comparison = pd.concat(results, axis=1)
-comparison
+specs <- list(
+  logreg      = logistic_reg(penalty = 0.01, mixture = 0)         |> set_engine("glmnet")    |> set_mode("classification"),
+  naive_bayes = naive_Bayes()                                     |> set_engine("naivebayes")|> set_mode("classification"),
+  linear_svm  = svm_linear()                                      |> set_engine("LiblineaR") |> set_mode("classification"),
+  xgboost     = boost_tree(trees = 500, learn_rate = 0.05)        |> set_engine("xgboost")   |> set_mode("classification")
+)
+
+results <- imap_dfr(specs, function(spec, name) {
+  wf <- workflow() |> add_recipe(rec_tfidf) |> add_model(spec)
+  cv_summary(wf, folds) |> mutate(model = name)
+})
+
+results |>
+  select(model, metric, mean, std_err) |>
+  pivot_wider(id_cols = metric, names_from = model, values_from = mean)
 ```
 
 ## Pick the best model and tune it
 
-Edit `BEST_NAME` once you know which candidate to take forward.
+Edit `BEST_NAME` once you know which candidate to take forward. The example
+below tunes `penalty` for the regularized logistic regression.
 
-```{python}
-BEST_NAME = "logreg"
-best_pipeline = candidates[BEST_NAME]
+```{r}
+BEST_NAME <- "logreg"
 
-param_grid = {
-    "tfidf__ngram_range": [(1, 1), (1, 2)],
-    "tfidf__min_df": [2, 5],
-    "clf__C": [0.5, 1.0, 2.0],
-}
+tune_spec <- logistic_reg(penalty = tune(), mixture = 0) |>
+  set_engine("glmnet") |>
+  set_mode("classification")
 
-search = GridSearchCV(
-    best_pipeline,
-    param_grid=param_grid,
-    scoring="f1_macro",
-    cv=stratified_cv(),
-    n_jobs=-1,
-    refit=True,
+tune_wf <- workflow() |>
+  add_recipe(rec_tfidf) |>
+  add_model(tune_spec)
+
+penalty_grid <- grid_regular(penalty(range = c(-4, 0)), levels = 8)
+
+tune_res <- tune::tune_grid(
+  tune_wf,
+  resamples = folds,
+  grid      = penalty_grid,
+  metrics   = cv_metrics(),
+  control   = control_grid(event_level = "second")
 )
-search.fit(X_train, y_train)
-search.best_params_, search.best_score_
+
+best_params <- select_best(tune_res, metric = "f_meas")
+best_params
+```
+
+```{r}
+final_wf <- finalize_workflow(tune_wf, best_params)
+final_fit <- fit(final_wf, data = train_df)
 ```
 
 ## Final evaluation on the held-out test set
 
 This is the **only** time we touch the test set.
 
-```{python}
-final_model = search.best_estimator_
-report = test_set_report(final_model, X_test, y_test)
-
-{k: v for k, v in report.items() if k not in {"confusion_matrix", "classification_report"}}
+```{r}
+report <- test_set_report(final_fit, test_df)
+report$metrics
 ```
 
-```{python}
-print(report["classification_report"])
+```{r}
+report$confusion_matrix
 ```
 
-```{python}
+```{r}
 #| label: confusion-matrix
-cm = report["confusion_matrix"]
-fig, ax = plt.subplots(figsize=(4, 3.5))
-sns.heatmap(
-    cm,
-    annot=True,
-    fmt="d",
-    cmap="Blues",
-    xticklabels=["human", "ai"],
-    yticklabels=["human", "ai"],
-    cbar=False,
-    ax=ax,
+fig_dir <- here::here("reports", "figures")
+dir.create(fig_dir, showWarnings = FALSE, recursive = TRUE)
+
+cm_plot <- autoplot(report$confusion_matrix, type = "heatmap") +
+  ggplot2::labs(title = "Confusion matrix — held-out test set")
+
+ggplot2::ggsave(
+  filename = file.path(fig_dir, "confusion_matrix.png"),
+  plot = cm_plot, width = 5, height = 4, dpi = 150
 )
-ax.set_xlabel("Predicted")
-ax.set_ylabel("Actual")
-ax.set_title("Confusion matrix — held-out test set")
-plt.tight_layout()
-plt.savefig(PROJECT_ROOT / "reports" / "figures" / "confusion_matrix.png", dpi=150)
+
+cm_plot
 ```
 
 ## Inspect the most informative features
 
-```{python}
+```{r}
 #| label: top-features
-vectorizer = final_model.named_steps["tfidf"]
-clf = final_model.named_steps["clf"]
-
-if hasattr(clf, "coef_"):
-    feature_names = np.array(vectorizer.get_feature_names_out())
-    coefs = clf.coef_.ravel()
-    top_ai = pd.Series(coefs, index=feature_names).nlargest(20)
-    top_human = pd.Series(coefs, index=feature_names).nsmallest(20)
-    pd.concat({"top AI-leaning": top_ai, "top human-leaning": top_human}, axis=1)
+final_fit |>
+  extract_fit_parsnip() |>
+  vip::vi() |>
+  slice_max(abs(Importance), n = 30) |>
+  arrange(desc(Importance))
 ```
 
 ## Persist the final model
 
-```{python}
-models_dir = PROJECT_ROOT / "models"
-models_dir.mkdir(exist_ok=True)
-joblib.dump(final_model, models_dir / f"{BEST_NAME}_final.joblib")
+```{r}
+models_dir <- here::here("models")
+dir.create(models_dir, showWarnings = FALSE, recursive = TRUE)
+
+saveRDS(final_fit, file = file.path(models_dir, paste0(BEST_NAME, "_final.rds")))
 ```
 
 ## Notes for the report

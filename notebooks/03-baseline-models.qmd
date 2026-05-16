@@ -13,71 +13,91 @@ execute:
   message: false
 ---
 
-```{python}
+```{r}
 #| label: setup
-import sys
-from pathlib import Path
+here::i_am("notebooks/03-baseline-models.qmd")
 
-PROJECT_ROOT = Path.cwd().parent if Path.cwd().name == "notebooks" else Path.cwd()
-sys.path.append(str(PROJECT_ROOT))
+source(here::here("R", "features.R"))
+source(here::here("R", "evaluation.R"))
 
-import pandas as pd
-from sklearn.linear_model import LogisticRegression
-from sklearn.naive_bayes import MultinomialNB
-from sklearn.pipeline import Pipeline
+library(tidyverse)
+library(tidymodels)
+library(textrecipes)
+library(discrim)
 
-from src.features import build_tfidf_vectorizer
-from src.evaluation import cv_summary
+tidymodels_prefer()
 ```
 
 ## Load processed training data
 
-```{python}
-train_df = pd.read_csv(PROJECT_ROOT / "data" / "processed" / "train.csv")
-X_train, y_train = train_df["text"], train_df["generated"]
-X_train.shape, y_train.shape
+```{r}
+train_df <- readr::read_csv(
+  here::here("data", "processed", "train.csv"),
+  show_col_types = FALSE
+) |>
+  mutate(generated = factor(generated, levels = c("human", "ai")))
+
+dim(train_df)
+```
+
+## Shared CV folds
+
+Every baseline uses the same stratified 5-fold split so the comparison is fair.
+
+```{r}
+folds <- cv_folds(train_df)
+folds
 ```
 
 ## Baseline 1: TF-IDF + Logistic Regression
 
-The vectorizer lives inside the pipeline so it is fit only on the training
-fold during cross-validation. This avoids leaking test-fold vocabulary into
-training.
+The TF-IDF step lives inside the recipe, so the vocabulary is learned only
+from the training fold during cross-validation. This avoids leaking test-fold
+vocabulary into training.
 
-```{python}
-logreg = Pipeline([
-    ("tfidf", build_tfidf_vectorizer()),
-    ("clf", LogisticRegression(max_iter=1000, n_jobs=-1)),
-])
+```{r}
+rec_tfidf <- tfidf_recipe(generated ~ text, data = train_df)
 
-logreg_cv = cv_summary(logreg, X_train, y_train)
+logreg_spec <- logistic_reg(penalty = 0.01, mixture = 0) |>
+  set_engine("glmnet") |>
+  set_mode("classification")
+
+logreg_wf <- workflow() |>
+  add_recipe(rec_tfidf) |>
+  add_model(logreg_spec)
+
+logreg_cv <- cv_summary(logreg_wf, folds)
 logreg_cv
 ```
 
-## Baseline 2: TF-IDF + Multinomial Naive Bayes
+## Baseline 2: TF-IDF + Naive Bayes
 
-```{python}
-nb = Pipeline([
-    ("tfidf", build_tfidf_vectorizer()),
-    ("clf", MultinomialNB()),
-])
+```{r}
+nb_spec <- naive_Bayes() |>
+  set_engine("naivebayes") |>
+  set_mode("classification")
 
-nb_cv = cv_summary(nb, X_train, y_train)
+nb_wf <- workflow() |>
+  add_recipe(rec_tfidf) |>
+  add_model(nb_spec)
+
+nb_cv <- cv_summary(nb_wf, folds)
 nb_cv
 ```
 
 ## Side-by-side comparison
 
-```{python}
-comparison = pd.concat(
-    {"logreg": logreg_cv, "naive_bayes": nb_cv}, axis=1
-)
-comparison
+```{r}
+bind_rows(
+  logreg_cv |> mutate(model = "logreg"),
+  nb_cv     |> mutate(model = "naive_bayes")
+) |>
+  pivot_wider(id_cols = metric, names_from = model, values_from = mean)
 ```
 
 ## Notes
 
-- These numbers are 5-fold CV means/std on the **training** set only.
-- The test set is still untouched — we report final numbers in notebook 04.
+- These numbers are 5-fold CV means on the **training** set only.
+- The test set is still untouched — final numbers are reported in notebook 04.
 - If one baseline is dramatically ahead, note it here and bring it forward as
   the model to tune.

@@ -13,27 +13,25 @@ execute:
   message: false
 ---
 
-```{python}
+```{r}
 #| label: setup
-import sys
-from pathlib import Path
+here::i_am("notebooks/02-preprocessing.qmd")
 
-PROJECT_ROOT = Path.cwd().parent if Path.cwd().name == "notebooks" else Path.cwd()
-sys.path.append(str(PROJECT_ROOT))
+source(here::here("R", "data.R"))
 
-import pandas as pd
-
-from src.data import load_essays, stratified_split
+library(tidyverse)
+library(rsample)
 ```
 
 ## Load and basic cleaning
 
-```{python}
-df = load_essays()
+```{r}
+df <- load_essays(here::here("data", "raw", "AI_Human.csv")) |>
+  mutate(text = stringr::str_squish(text)) |>
+  filter(nchar(text) > 0) |>
+  distinct(text, .keep_all = TRUE)
 
-df = df.assign(text=df["text"].str.strip())
-df = df[df["text"].str.len() > 0].drop_duplicates(subset="text").reset_index(drop=True)
-df.shape
+dim(df)
 ```
 
 ## Stratified 80/20 train/test split
@@ -42,26 +40,27 @@ We hold out 20% of the data as a test set and only touch it at the very end of
 the project. All cross-validation and model selection happens on the training
 set.
 
-```{python}
-X_train, X_test, y_train, y_test = stratified_split(df)
+```{r}
+splits <- stratified_split(df)
+train_df <- training(splits)
+test_df  <- testing(splits)
 
-pd.DataFrame({
-    "split": ["train", "test"],
-    "n": [len(X_train), len(X_test)],
-    "pct_ai": [y_train.mean().round(3), y_test.mean().round(3)],
-})
+tibble(
+  split  = c("train", "test"),
+  n      = c(nrow(train_df), nrow(test_df)),
+  pct_ai = c(mean(train_df$generated == "ai"),
+             mean(test_df$generated  == "ai")) |> round(3)
+)
 ```
 
 ## Save processed splits
 
-```{python}
-processed_dir = PROJECT_ROOT / "data" / "processed"
-processed_dir.mkdir(parents=True, exist_ok=True)
+```{r}
+processed_dir <- here::here("data", "processed")
+dir.create(processed_dir, showWarnings = FALSE, recursive = TRUE)
 
-train_df = pd.DataFrame({"text": X_train, "generated": y_train})
-test_df = pd.DataFrame({"text": X_test, "generated": y_test})
+readr::write_csv(train_df, file.path(processed_dir, "train.csv"))
+readr::write_csv(test_df,  file.path(processed_dir, "test.csv"))
 
-train_df.to_csv(processed_dir / "train.csv", index=False)
-test_df.to_csv(processed_dir / "test.csv", index=False)
-list(processed_dir.glob("*.csv"))
+list.files(processed_dir, pattern = "\\.csv$")
 ```

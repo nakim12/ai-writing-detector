@@ -27,25 +27,25 @@ The primary question that we want to answer is "Can machine learning models accu
 
 ## Evaluation Plan
 
-Based on feedback we received, we want to make our evaluation strategy more concrete. We will split the data using a stratified 80/20 train/test split so that the 50/50 class balance is preserved in both partitions. The held-out test set will only be touched once at the very end of the project to report final, unbiased performance numbers.
+Based on feedback we received, we want to make our evaluation strategy more concrete. We will implement everything in R using the `tidymodels` ecosystem (with `textrecipes` for TF-IDF). The data will be split using a stratified 80/20 train/test split via `rsample::initial_split(strata = generated)` so that the 50/50 class balance is preserved in both partitions. The held-out test set will only be touched once at the very end of the project to report final, unbiased performance numbers.
 
-For model selection and hyperparameter tuning we will use stratified 5-fold cross-validation on the training set. Each candidate model (logistic regression, multinomial Naive Bayes, and at least one stronger comparison model such as a linear SVM or gradient-boosted trees) will be evaluated with the same folds so the comparison is fair, and we will use `scikit-learn` pipelines so that vectorization (TF-IDF) is fit only on the training fold to avoid data leakage.
+For model selection and hyperparameter tuning we will use stratified 5-fold cross-validation on the training set (`rsample::vfold_cv(strata = generated)`). Each candidate model (logistic regression via `glmnet`, Naive Bayes via `naivebayes`, and at least one stronger comparison model such as a linear SVM (`LiblineaR`) or boosted trees (`xgboost`)) will be evaluated with the same folds so the comparison is fair. We will use `workflows::workflow()` objects with the TF-IDF step inside a `recipe`, so the vocabulary is learned only from the analysis fold during CV — this avoids data leakage.
 
 Because the classes are perfectly balanced, accuracy is a reasonable headline metric, but we will not rely on it alone. We will report:
 
 - **Accuracy** as a quick overall score.
-- **Precision, recall, and F1-score** for the AI-generated class (and macro-averaged across both classes), since false positives (calling a human essay "AI") and false negatives (missing AI text) carry different real-world costs.
+- **Precision, recall, and F-measure** for the AI-generated class (treated as the positive class via `event_level = "second"`), since false positives (calling a human essay "AI") and false negatives (missing AI text) carry different real-world costs.
 - **ROC-AUC and the confusion matrix** to understand the trade-off between the two error types and to visualize where the model struggles.
-- **Cross-validation mean and standard deviation** for each metric, so we can tell whether differences between models are meaningful or within noise.
+- **Cross-validation mean and standard error** for each metric, so we can tell whether differences between models are meaningful or within noise.
 
-For the final chosen model we will also do a brief error analysis: looking at the misclassified essays, the most informative TF-IDF features, and per-prompt or per-length performance, to make sure the model is learning real linguistic patterns instead of dataset artifacts.
+All metrics are computed with `yardstick`. For the final chosen model we will also do a brief error analysis: looking at the misclassified essays, the most informative TF-IDF features (via `vip::vi()`), and per-prompt or per-length performance, to make sure the model is learning real linguistic patterns instead of dataset artifacts.
 
 ## Timeline
 
 As a team, we have gone through an initial week by week plan to stay on track throughout the quarter. We will change it as needed to accommodate our schedules, but this is a baseline project timeline that we have created:
 
 - Week 5: Clean data and perform exploratory analysis
-- Week 6: Build baseline NLP model (Logistic Regression / Naive Bayes) with the train/test split and CV pipeline described above
+- Week 6: Build baseline NLP model (Logistic Regression / Naive Bayes) with the train/test split and tidymodels CV workflow described above
 - Week 7: Compare multiple models using the same cross-validation folds and metrics
 - Week 8: Tune the best model, evaluate on the held-out test set, and run error analysis
 - Week 9/10: Interpret results and create visuals, write final report and prepare presentation

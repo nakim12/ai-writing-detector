@@ -13,82 +13,89 @@ execute:
   message: false
 ---
 
-```{python}
+```{r}
 #| label: setup
-import sys
-from pathlib import Path
+here::i_am("notebooks/01-eda.qmd")
 
-# Make src/ importable when this notebook is rendered from the notebooks/ folder.
-PROJECT_ROOT = Path.cwd().parent if Path.cwd().name == "notebooks" else Path.cwd()
-sys.path.append(str(PROJECT_ROOT))
+source(here::here("R", "data.R"))
+source(here::here("R", "features.R"))
 
-import matplotlib.pyplot as plt
-import numpy as np
-import pandas as pd
-import seaborn as sns
+library(tidyverse)
+library(scales)
 
-from src.data import load_essays
-from src.features import stylometric_features
-
-sns.set_theme(style="whitegrid")
+theme_set(theme_minimal(base_size = 12))
 ```
 
 ## Load the data
 
-```{python}
+```{r}
 #| label: load
-df = load_essays()
-df.shape
+df <- load_essays(here::here("data", "raw", "AI_Human.csv"))
+dim(df)
 ```
 
-```{python}
-df.head()
+```{r}
+head(df)
 ```
 
 ## Class balance
 
 The dataset is intentionally balanced — confirm the 50/50 split is preserved.
 
-```{python}
+```{r}
 #| label: class-balance
-df["generated"].value_counts().rename({0: "human", 1: "ai"})
+df |>
+  count(generated) |>
+  mutate(pct = n / sum(n))
 ```
 
 ## Length distributions
 
-```{python}
+```{r}
 #| label: lengths
-df = df.assign(
-    n_chars=df["text"].str.len(),
-    n_words=df["text"].str.split().map(len),
-)
+df_len <- df |>
+  mutate(
+    n_chars = nchar(text),
+    n_words = lengths(stringr::str_extract_all(text, "\\b\\w+\\b"))
+  )
 
-fig, axes = plt.subplots(1, 2, figsize=(12, 4))
-sns.histplot(
-    data=df, x="n_words", hue="generated", bins=50, kde=True, ax=axes[0]
-)
-axes[0].set_title("Word count by class")
-sns.boxplot(data=df, x="generated", y="n_words", ax=axes[1])
-axes[1].set_title("Word count, boxplot")
-plt.tight_layout()
+ggplot(df_len, aes(x = n_words, fill = generated)) +
+  geom_histogram(bins = 50, position = "identity", alpha = 0.6) +
+  scale_x_continuous(labels = comma) +
+  labs(title = "Word count by class", x = "words", y = "essays")
+```
+
+```{r}
+ggplot(df_len, aes(x = generated, y = n_words, fill = generated)) +
+  geom_boxplot(alpha = 0.7, show.legend = FALSE) +
+  labs(title = "Word count, boxplot", x = NULL, y = "words")
 ```
 
 ## Stylometric features
 
-```{python}
+```{r}
 #| label: stylometric
-style = stylometric_features(df["text"])
-style["generated"] = df["generated"].values
-style.groupby("generated").mean(numeric_only=True).T
+style <- stylometric_features(df$text) |>
+  mutate(generated = df$generated)
+
+style |>
+  group_by(generated) |>
+  summarise(across(where(is.numeric), mean), .groups = "drop") |>
+  pivot_longer(-generated, names_to = "feature", values_to = "mean") |>
+  pivot_wider(names_from = generated, values_from = mean)
 ```
 
-```{python}
+```{r}
 #| label: stylometric-plot
-fig, axes = plt.subplots(1, 3, figsize=(15, 4))
-for ax, col in zip(axes, ["avg_sentence_len_words", "type_token_ratio", "punct_rate"]):
-    sns.boxplot(data=style, x="generated", y=col, ax=ax)
-    ax.set_title(col)
-plt.tight_layout()
+#| fig-width: 12
+#| fig-height: 4
+style |>
+  select(generated, avg_sentence_len_words, type_token_ratio, punct_rate) |>
+  pivot_longer(-generated, names_to = "feature", values_to = "value") |>
+  ggplot(aes(x = generated, y = value, fill = generated)) +
+  geom_boxplot(alpha = 0.7, show.legend = FALSE) +
+  facet_wrap(~ feature, scales = "free_y") +
+  labs(x = NULL, y = NULL)
 ```
 
 ## Notes for the team

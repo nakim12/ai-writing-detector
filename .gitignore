@@ -8,29 +8,31 @@ data/processed/*
 models/*
 !models/.gitkeep
 
-# Quarto / Jupyter build output
+# Quarto build output
 *_files/
 *.html
 *.pdf
 .quarto/
 _site/
 _freeze/
-.ipynb_checkpoints/
 
-# Python
-__pycache__/
-*.py[cod]
-*$py.class
-*.egg-info/
-.eggs/
-build/
-dist/
+# R / RStudio
+.Rproj.user/
+.Rhistory
+.Rapp.history
+.RData
+.Ruserdata
+*.Rproj
+.Rcheck/
+*.rds.bak
 
-# Virtual environments
-.venv/
-venv/
-env/
-.env
+# renv (uncomment if you adopt renv later)
+# renv/library/
+# renv/local/
+# renv/cellar/
+# renv/lock/
+# renv/python/
+# renv/staging/
 
 # IDE / OS
 .vscode/
