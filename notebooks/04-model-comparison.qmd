@@ -1,0 +1,173 @@
+---
+title: "04 — Model Comparison, Tuning & Final Evaluation"
+author: "PSTAT 134 — AI Writing Detector"
+format:
+  html:
+    toc: true
+    toc-location: left
+    embed-resources: true
+    theme: simplex
+    code-fold: show
+execute:
+  warning: false
+  message: false
+---
+
+```{python}
+#| label: setup
+import sys
+from pathlib import Path
+
+PROJECT_ROOT = Path.cwd().parent if Path.cwd().name == "notebooks" else Path.cwd()
+sys.path.append(str(PROJECT_ROOT))
+
+import joblib
+import matplotlib.pyplot as plt
+import numpy as np
+import pandas as pd
+import seaborn as sns
+from sklearn.ensemble import GradientBoostingClassifier
+from sklearn.linear_model import LogisticRegression
+from sklearn.model_selection import GridSearchCV
+from sklearn.naive_bayes import MultinomialNB
+from sklearn.pipeline import Pipeline
+from sklearn.svm import LinearSVC
+
+from src.features import build_tfidf_vectorizer
+from src.evaluation import cv_summary, stratified_cv, test_set_report
+
+sns.set_theme(style="whitegrid")
+```
+
+## Load processed train/test splits
+
+```{python}
+train_df = pd.read_csv(PROJECT_ROOT / "data" / "processed" / "train.csv")
+test_df = pd.read_csv(PROJECT_ROOT / "data" / "processed" / "test.csv")
+X_train, y_train = train_df["text"], train_df["generated"]
+X_test, y_test = test_df["text"], test_df["generated"]
+```
+
+## Compare candidate models with shared CV folds
+
+Every model uses the **same** stratified folds so the comparison is fair.
+
+```{python}
+candidates = {
+    "logreg": Pipeline([
+        ("tfidf", build_tfidf_vectorizer()),
+        ("clf", LogisticRegression(max_iter=1000, n_jobs=-1)),
+    ]),
+    "naive_bayes": Pipeline([
+        ("tfidf", build_tfidf_vectorizer()),
+        ("clf", MultinomialNB()),
+    ]),
+    "linear_svm": Pipeline([
+        ("tfidf", build_tfidf_vectorizer()),
+        ("clf", LinearSVC()),
+    ]),
+    "gboost": Pipeline([
+        ("tfidf", build_tfidf_vectorizer(max_features=5000)),
+        ("clf", GradientBoostingClassifier(random_state=42)),
+    ]),
+}
+
+cv = stratified_cv()
+results = {name: cv_summary(model, X_train, y_train, cv=cv) for name, model in candidates.items()}
+comparison = pd.concat(results, axis=1)
+comparison
+```
+
+## Pick the best model and tune it
+
+Edit `BEST_NAME` once you know which candidate to take forward.
+
+```{python}
+BEST_NAME = "logreg"
+best_pipeline = candidates[BEST_NAME]
+
+param_grid = {
+    "tfidf__ngram_range": [(1, 1), (1, 2)],
+    "tfidf__min_df": [2, 5],
+    "clf__C": [0.5, 1.0, 2.0],
+}
+
+search = GridSearchCV(
+    best_pipeline,
+    param_grid=param_grid,
+    scoring="f1_macro",
+    cv=stratified_cv(),
+    n_jobs=-1,
+    refit=True,
+)
+search.fit(X_train, y_train)
+search.best_params_, search.best_score_
+```
+
+## Final evaluation on the held-out test set
+
+This is the **only** time we touch the test set.
+
+```{python}
+final_model = search.best_estimator_
+report = test_set_report(final_model, X_test, y_test)
+
+{k: v for k, v in report.items() if k not in {"confusion_matrix", "classification_report"}}
+```
+
+```{python}
+print(report["classification_report"])
+```
+
+```{python}
+#| label: confusion-matrix
+cm = report["confusion_matrix"]
+fig, ax = plt.subplots(figsize=(4, 3.5))
+sns.heatmap(
+    cm,
+    annot=True,
+    fmt="d",
+    cmap="Blues",
+    xticklabels=["human", "ai"],
+    yticklabels=["human", "ai"],
+    cbar=False,
+    ax=ax,
+)
+ax.set_xlabel("Predicted")
+ax.set_ylabel("Actual")
+ax.set_title("Confusion matrix — held-out test set")
+plt.tight_layout()
+plt.savefig(PROJECT_ROOT / "reports" / "figures" / "confusion_matrix.png", dpi=150)
+```
+
+## Inspect the most informative features
+
+```{python}
+#| label: top-features
+vectorizer = final_model.named_steps["tfidf"]
+clf = final_model.named_steps["clf"]
+
+if hasattr(clf, "coef_"):
+    feature_names = np.array(vectorizer.get_feature_names_out())
+    coefs = clf.coef_.ravel()
+    top_ai = pd.Series(coefs, index=feature_names).nlargest(20)
+    top_human = pd.Series(coefs, index=feature_names).nsmallest(20)
+    pd.concat({"top AI-leaning": top_ai, "top human-leaning": top_human}, axis=1)
+```
+
+## Persist the final model
+
+```{python}
+models_dir = PROJECT_ROOT / "models"
+models_dir.mkdir(exist_ok=True)
+joblib.dump(final_model, models_dir / f"{BEST_NAME}_final.joblib")
+```
+
+## Notes for the report
+
+- Compare the CV ranking to the test-set ranking — large gaps suggest
+  overfitting to the CV folds.
+- Use the top features and confusion matrix to argue *why* the model is making
+  the predictions it makes.
+- Discuss how well any of this would generalize to AI text from a different
+  generator (e.g., a newer model than the one in the dataset).

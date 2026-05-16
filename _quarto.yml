@@ -1,0 +1,19 @@
+project:
+  type: default
+  render:
+    - Project-Memo.qmd
+    - notebooks/*.qmd
+
+execute:
+  warning: false
+  message: false
+  freeze: auto
+
+format:
+  html:
+    toc: true
+    toc-location: left
+    toc-depth: 4
+    embed-resources: true
+    theme: simplex
+    code-fold: show

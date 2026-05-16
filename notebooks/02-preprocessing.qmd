@@ -1,0 +1,67 @@
+---
+title: "02 — Preprocessing & Train/Test Split"
+author: "PSTAT 134 — AI Writing Detector"
+format:
+  html:
+    toc: true
+    toc-location: left
+    embed-resources: true
+    theme: simplex
+    code-fold: show
+execute:
+  warning: false
+  message: false
+---
+
+```{python}
+#| label: setup
+import sys
+from pathlib import Path
+
+PROJECT_ROOT = Path.cwd().parent if Path.cwd().name == "notebooks" else Path.cwd()
+sys.path.append(str(PROJECT_ROOT))
+
+import pandas as pd
+
+from src.data import load_essays, stratified_split
+```
+
+## Load and basic cleaning
+
+```{python}
+df = load_essays()
+
+df = df.assign(text=df["text"].str.strip())
+df = df[df["text"].str.len() > 0].drop_duplicates(subset="text").reset_index(drop=True)
+df.shape
+```
+
+## Stratified 80/20 train/test split
+
+We hold out 20% of the data as a test set and only touch it at the very end of
+the project. All cross-validation and model selection happens on the training
+set.
+
+```{python}
+X_train, X_test, y_train, y_test = stratified_split(df)
+
+pd.DataFrame({
+    "split": ["train", "test"],
+    "n": [len(X_train), len(X_test)],
+    "pct_ai": [y_train.mean().round(3), y_test.mean().round(3)],
+})
+```
+
+## Save processed splits
+
+```{python}
+processed_dir = PROJECT_ROOT / "data" / "processed"
+processed_dir.mkdir(parents=True, exist_ok=True)
+
+train_df = pd.DataFrame({"text": X_train, "generated": y_train})
+test_df = pd.DataFrame({"text": X_test, "generated": y_test})
+
+train_df.to_csv(processed_dir / "train.csv", index=False)
+test_df.to_csv(processed_dir / "test.csv", index=False)
+list(processed_dir.glob("*.csv"))
+```

@@ -1,0 +1,19 @@
+# Core data + ML
+numpy>=1.26
+pandas>=2.2
+scikit-learn>=1.4
+scipy>=1.12
+
+# NLP
+nltk>=3.8
+
+# Visualization
+matplotlib>=3.8
+seaborn>=0.13
+
+# Notebooks (Quarto uses Jupyter under the hood for Python chunks)
+jupyter>=1.0
+ipykernel>=6.29
+
+# Model persistence
+joblib>=1.3

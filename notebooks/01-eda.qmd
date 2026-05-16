@@ -1,0 +1,98 @@
+---
+title: "01 — Exploratory Data Analysis"
+author: "PSTAT 134 — AI Writing Detector"
+format:
+  html:
+    toc: true
+    toc-location: left
+    embed-resources: true
+    theme: simplex
+    code-fold: show
+execute:
+  warning: false
+  message: false
+---
+
+```{python}
+#| label: setup
+import sys
+from pathlib import Path
+
+# Make src/ importable when this notebook is rendered from the notebooks/ folder.
+PROJECT_ROOT = Path.cwd().parent if Path.cwd().name == "notebooks" else Path.cwd()
+sys.path.append(str(PROJECT_ROOT))
+
+import matplotlib.pyplot as plt
+import numpy as np
+import pandas as pd
+import seaborn as sns
+
+from src.data import load_essays
+from src.features import stylometric_features
+
+sns.set_theme(style="whitegrid")
+```
+
+## Load the data
+
+```{python}
+#| label: load
+df = load_essays()
+df.shape
+```
+
+```{python}
+df.head()
+```
+
+## Class balance
+
+The dataset is intentionally balanced — confirm the 50/50 split is preserved.
+
+```{python}
+#| label: class-balance
+df["generated"].value_counts().rename({0: "human", 1: "ai"})
+```
+
+## Length distributions
+
+```{python}
+#| label: lengths
+df = df.assign(
+    n_chars=df["text"].str.len(),
+    n_words=df["text"].str.split().map(len),
+)
+
+fig, axes = plt.subplots(1, 2, figsize=(12, 4))
+sns.histplot(
+    data=df, x="n_words", hue="generated", bins=50, kde=True, ax=axes[0]
+)
+axes[0].set_title("Word count by class")
+sns.boxplot(data=df, x="generated", y="n_words", ax=axes[1])
+axes[1].set_title("Word count, boxplot")
+plt.tight_layout()
+```
+
+## Stylometric features
+
+```{python}
+#| label: stylometric
+style = stylometric_features(df["text"])
+style["generated"] = df["generated"].values
+style.groupby("generated").mean(numeric_only=True).T
+```
+
+```{python}
+#| label: stylometric-plot
+fig, axes = plt.subplots(1, 3, figsize=(15, 4))
+for ax, col in zip(axes, ["avg_sentence_len_words", "type_token_ratio", "punct_rate"]):
+    sns.boxplot(data=style, x="generated", y=col, ax=ax)
+    ax.set_title(col)
+plt.tight_layout()
+```
+
+## Notes for the team
+
+- Are the two classes separable on simple length / punctuation features alone?
+- Which features look most promising as descriptive variables for the report?
+- Anything weird (extremely short essays, duplicated text, encoding issues) we should clean before modeling?

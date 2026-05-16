@@ -1,0 +1,55 @@
+---
+title: "Project Memo"
+author: "Priyanka Durai, Lindsay Der, Dylan Cino, Victoria Hamman, Nathan Kim PSTAT 134"
+format:
+  html:
+    toc: true
+    toc-location: left
+    toc-depth: 4
+    embed-resources: true
+    theme: simplex
+    code-fold: show
+editor: visual
+execute:
+  warning: false
+  message: false
+---
+
+# Project Memo
+
+## Dataset
+
+Our project uses the Kaggle dataset called Human vs AI Generated Essays, which contains written samples of text and whether they are human written or AI generated. Here is the link to the dataset: (https://www.kaggle.com/datasets/navjotkaushal/human-vs-ai-generated-essays?resource=download). There are 2750 observations and 2 variables. The first variable, `text`, is the text sample and the second variable, `generated` is a binary outcome with value 0 if it is human text and value 1 if it is AI text. There are exactly 1375 observations for each binary outcome which we feel would help to give our model sufficient data to train on for each classification outcome. The dataset does not contain any missing values which simplifies our preprocessing and we plan to use NLP methods such as tokenization and TF-IDF vectorization since the data is mostly text based.
+
+## Research Question and Predictors
+
+The primary question that we want to answer is "Can machine learning models accurately predict whether or not writing is AI generated?" The response variable in this case would be `generated`, with 1 indicating AI generated text and 0 indicating human writing. Some predictors that we think could be useful for our question are word frequencies, TF-IDF scores, sentence length patterns, and punctuation uses. The overall goal of our project is mostly predictive since we want to classify new text samples correctly, but there are also descriptive aspects since we want to dig into what characteristics are typical of AI generated writing.
+
+## Evaluation Plan
+
+Based on feedback we received, we want to make our evaluation strategy more concrete. We will split the data using a stratified 80/20 train/test split so that the 50/50 class balance is preserved in both partitions. The held-out test set will only be touched once at the very end of the project to report final, unbiased performance numbers.
+
+For model selection and hyperparameter tuning we will use stratified 5-fold cross-validation on the training set. Each candidate model (logistic regression, multinomial Naive Bayes, and at least one stronger comparison model such as a linear SVM or gradient-boosted trees) will be evaluated with the same folds so the comparison is fair, and we will use `scikit-learn` pipelines so that vectorization (TF-IDF) is fit only on the training fold to avoid data leakage.
+
+Because the classes are perfectly balanced, accuracy is a reasonable headline metric, but we will not rely on it alone. We will report:
+
+- **Accuracy** as a quick overall score.
+- **Precision, recall, and F1-score** for the AI-generated class (and macro-averaged across both classes), since false positives (calling a human essay "AI") and false negatives (missing AI text) carry different real-world costs.
+- **ROC-AUC and the confusion matrix** to understand the trade-off between the two error types and to visualize where the model struggles.
+- **Cross-validation mean and standard deviation** for each metric, so we can tell whether differences between models are meaningful or within noise.
+
+For the final chosen model we will also do a brief error analysis: looking at the misclassified essays, the most informative TF-IDF features, and per-prompt or per-length performance, to make sure the model is learning real linguistic patterns instead of dataset artifacts.
+
+## Timeline
+
+As a team, we have gone through an initial week by week plan to stay on track throughout the quarter. We will change it as needed to accommodate our schedules, but this is a baseline project timeline that we have created:
+
+- Week 5: Clean data and perform exploratory analysis
+- Week 6: Build baseline NLP model (Logistic Regression / Naive Bayes) with the train/test split and CV pipeline described above
+- Week 7: Compare multiple models using the same cross-validation folds and metrics
+- Week 8: Tune the best model, evaluate on the held-out test set, and run error analysis
+- Week 9/10: Interpret results and create visuals, write final report and prepare presentation
+
+## Anticipated Challenges
+
+Though we are very early into the project, some potential challenges that we are worried about are issues that can arise with training any model such as overfitting, making sure we evaluate the model fairly, and determining whether the model learns true language differences rather than just differences seen in the dataset. The cross-validation strategy and error analysis described above are how we plan to guard against these issues.
