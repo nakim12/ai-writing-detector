@@ -71,11 +71,15 @@ ggplot(df_len, aes(x = generated, y = n_words, fill = generated)) +
   labs(title = "Word count, boxplot", x = NULL, y = "words")
 ```
 
-## Stylometric features
+## Stylometric & readability features
+
+The teammate plan calls for readability indices (Flesch-Kincaid, etc.) in
+addition to the simple hand-crafted features, so `stylometric_features()` is
+called with `include_readability = TRUE`.
 
 ```{r}
 #| label: stylometric
-style <- stylometric_features(df$text) |>
+style <- stylometric_features(df$text, include_readability = TRUE) |>
   mutate(generated = df$generated)
 
 style |>
@@ -88,9 +92,10 @@ style |>
 ```{r}
 #| label: stylometric-plot
 #| fig-width: 12
-#| fig-height: 4
+#| fig-height: 7
 style |>
-  select(generated, avg_sentence_len_words, type_token_ratio, punct_rate) |>
+  select(generated, avg_sentence_len_words, type_token_ratio, punct_rate,
+         Flesch, Flesch.Kincaid, ARI) |>
   pivot_longer(-generated, names_to = "feature", values_to = "value") |>
   ggplot(aes(x = generated, y = value, fill = generated)) +
   geom_boxplot(alpha = 0.7, show.legend = FALSE) +

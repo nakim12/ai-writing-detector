@@ -55,8 +55,9 @@ In R or RStudio:
 source("setup.R")
 ```
 
-This installs `tidyverse`, `tidymodels`, `textrecipes`, `glmnet`, `discrim`,
-`naivebayes`, `LiblineaR`, `xgboost`, `vip`, `tidytext`, `stopwords`, plus
+This installs `tidyverse`, `here`, `tidymodels`, `textrecipes`, `glmnet`,
+`discrim`, `naivebayes`, `LiblineaR`, `ranger`, `xgboost`, `vip`, `tidytext`,
+`stopwords`, `quanteda` / `quanteda.textstats` (for readability scores), plus
 `knitr` / `rmarkdown` for rendering Quarto.
 
 ### 3. Download the data
@@ -87,11 +88,18 @@ You can also open any `.qmd` file in RStudio and click **Render**.
 
 ## Modeling Plan (Summary)
 
+The full plan lives in [`Project-Memo.qmd`](Project-Memo.qmd) and in the team's working outline. The repo implements it as follows:
+
 - **Split:** stratified 80/20 train/test using `rsample::initial_split(strata = generated)`. The test set is held out until the very end.
 - **Cross-validation:** stratified 5-fold CV on the training set via `rsample::vfold_cv(strata = generated)`. The TF-IDF step lives inside a `recipe`, so the vocabulary is learned only from the analysis (training) fold — no leakage.
-- **Models:** logistic regression (`glmnet`) and Naive Bayes (`naivebayes`) as baselines, plus at least one stronger comparison model (linear SVM via `LiblineaR` or boosted trees via `xgboost`).
+- **Features:** TF-IDF (uni- and bigrams, vocabulary capped at 20k tokens) plus hand-crafted stylometric features (length, type-token ratio, punctuation rates) and readability indices (Flesch, Flesch-Kincaid, ARI) via `quanteda.textstats`.
+- **Models:**
+  - *Floor:* majority-class null model (`parsnip::null_model()`) as a sanity-check baseline.
+  - *Baselines:* logistic regression (`glmnet`) and Naive Bayes (`naivebayes`).
+  - *Comparison:* linear SVM (`LiblineaR`), Random Forest (`ranger`), and boosted trees (`xgboost`).
+- **Tuning:** `tune::tune_grid()` over the regularization penalty (and any other hyperparameters) on the winning model, selected by F-measure on the AI class.
 - **Metrics:** accuracy, ROC-AUC, F-measure, precision, and recall on the AI-positive class, reported as CV mean and standard error so model differences can be judged against noise. Computed via `yardstick`.
-- **Error analysis:** inspect misclassified essays and the most informative TF-IDF features (`vip::vi()`) to check that the model is learning real linguistic patterns, not dataset artifacts.
+- **Error analysis:** confusion matrix on the held-out test set plus the most informative TF-IDF features (`vip::vi()`) to check that the model is learning real linguistic patterns, not dataset artifacts.
 
 ## License
 

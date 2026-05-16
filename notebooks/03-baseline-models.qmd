@@ -24,6 +24,7 @@ library(tidyverse)
 library(tidymodels)
 library(textrecipes)
 library(discrim)
+library(parsnip)
 
 tidymodels_prefer()
 ```
@@ -47,6 +48,28 @@ Every baseline uses the same stratified 5-fold split so the comparison is fair.
 ```{r}
 folds <- cv_folds(train_df)
 folds
+```
+
+## Baseline 0: Majority-class dummy classifier
+
+A sanity-check floor: always predict the majority class. With perfectly
+balanced classes this should land around 50% accuracy and 0.5 ROC-AUC —
+anything not beating this is no better than guessing.
+
+```{r}
+rec_passthrough <- recipe(generated ~ text, data = train_df) |>
+  update_role(text, new_role = "id")
+
+null_spec <- null_model() |>
+  set_engine("parsnip") |>
+  set_mode("classification")
+
+null_wf <- workflow() |>
+  add_recipe(rec_passthrough) |>
+  add_model(null_spec)
+
+null_cv <- cv_summary(null_wf, folds, metrics = metric_set(accuracy, f_meas))
+null_cv
 ```
 
 ## Baseline 1: TF-IDF + Logistic Regression
@@ -89,6 +112,7 @@ nb_cv
 
 ```{r}
 bind_rows(
+  null_cv   |> mutate(model = "null_dummy"),
   logreg_cv |> mutate(model = "logreg"),
   nb_cv     |> mutate(model = "naive_bayes")
 ) |>

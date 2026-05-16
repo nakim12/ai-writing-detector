@@ -14,14 +14,18 @@ License: file LICENSE
 Encoding: UTF-8
 Imports:
     tidyverse,
+    here,
     tidymodels,
     textrecipes,
     tidytext,
     stopwords,
+    quanteda,
+    quanteda.textstats,
     glmnet,
     discrim,
     naivebayes,
     LiblineaR,
+    ranger,
     xgboost,
     vip,
     knitr,

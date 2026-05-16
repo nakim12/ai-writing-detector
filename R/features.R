@@ -41,11 +41,34 @@ tfidf_recipe <- function(formula, data,
     textrecipes::step_tfidf(text)
 }
 
+#' Compute readability scores for each essay.
+#'
+#' Wraps `quanteda.textstats::textstat_readability()` so that the team can
+#' use industry-standard readability indices as additional descriptive or
+#' predictive features.
+#'
+#' @param texts Character vector of essays.
+#' @param measures Which indices to compute. Defaults to Flesch reading ease,
+#'   Flesch-Kincaid grade level, and the Automated Readability Index.
+#' @return A tibble with one row per essay and one column per measure.
+readability_features <- function(texts,
+                                 measures = c("Flesch", "Flesch.Kincaid", "ARI")) {
+  if (!requireNamespace("quanteda.textstats", quietly = TRUE)) {
+    stop("Package 'quanteda.textstats' is required. Run setup.R to install it.")
+  }
+  out <- quanteda.textstats::textstat_readability(
+    as.character(texts),
+    measure = measures
+  )
+  tibble::as_tibble(out[, measures, drop = FALSE])
+}
+
 #' Compute a small table of hand-crafted stylometric features.
 #'
 #' @param texts Character vector of essays.
+#' @param include_readability If TRUE, also compute Flesch / Flesch-Kincaid / ARI.
 #' @return A tibble with one row per essay.
-stylometric_features <- function(texts) {
+stylometric_features <- function(texts, include_readability = FALSE) {
   texts <- as.character(texts)
 
   word_lists <- stringr::str_extract_all(texts, "\\b\\w+\\b")
@@ -66,7 +89,7 @@ stylometric_features <- function(texts) {
   comma_count <- stringr::str_count(texts, ",")
   upper_count <- stringr::str_count(texts, "[A-Z]")
 
-  tibble::tibble(
+  out <- tibble::tibble(
     n_chars = as.numeric(nchar(texts)),
     n_words = as.numeric(lengths(word_lists)),
     n_sentences = as.numeric(lengths(sentence_lists)),
@@ -77,4 +100,9 @@ stylometric_features <- function(texts) {
     comma_rate = comma_count / n_chars,
     uppercase_rate = upper_count / n_chars
   )
+
+  if (isTRUE(include_readability)) {
+    out <- dplyr::bind_cols(out, readability_features(texts))
+  }
+  out
 }

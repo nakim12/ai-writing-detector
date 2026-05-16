@@ -55,10 +55,11 @@ folds <- cv_folds(train_df)
 rec_tfidf <- tfidf_recipe(generated ~ text, data = train_df)
 
 specs <- list(
-  logreg      = logistic_reg(penalty = 0.01, mixture = 0)         |> set_engine("glmnet")    |> set_mode("classification"),
-  naive_bayes = naive_Bayes()                                     |> set_engine("naivebayes")|> set_mode("classification"),
-  linear_svm  = svm_linear()                                      |> set_engine("LiblineaR") |> set_mode("classification"),
-  xgboost     = boost_tree(trees = 500, learn_rate = 0.05)        |> set_engine("xgboost")   |> set_mode("classification")
+  logreg        = logistic_reg(penalty = 0.01, mixture = 0)         |> set_engine("glmnet")    |> set_mode("classification"),
+  naive_bayes   = naive_Bayes()                                     |> set_engine("naivebayes")|> set_mode("classification"),
+  linear_svm    = svm_linear()                                      |> set_engine("LiblineaR") |> set_mode("classification"),
+  random_forest = rand_forest(trees = 500)                          |> set_engine("ranger")    |> set_mode("classification"),
+  xgboost       = boost_tree(trees = 500, learn_rate = 0.05)        |> set_engine("xgboost")   |> set_mode("classification")
 )
 
 results <- imap_dfr(specs, function(spec, name) {
