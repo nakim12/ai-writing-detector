@@ -3,6 +3,7 @@ data/raw/*
 data/processed/*
 !data/raw/.gitkeep
 !data/processed/.gitkeep
+data/raw/HC3_balanced.csv
 
 # Trained model artifacts
 models/*
