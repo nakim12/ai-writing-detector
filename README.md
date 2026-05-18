@@ -62,7 +62,7 @@ This installs `tidyverse`, `here`, `tidymodels`, `textrecipes`, `glmnet`,
 
 ### 3. Download the data
 
-Download the dataset from [HuggingFace](https://huggingface.co/datasets/Hello-SimpleAI/HC3) and place the CSV at:
+Download the dataset from iMessage and place the CSV at:
 
 ```
 data/raw/AI_Human.csv
