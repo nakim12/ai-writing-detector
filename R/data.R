@@ -13,7 +13,7 @@ suppressPackageStartupMessages({
 RANDOM_SEED <- 42L
 TEST_PROP <- 0.20
 
-DEFAULT_RAW_PATH <- file.path("data", "raw", "AI_Human.csv")
+DEFAULT_RAW_PATH <- file.path("data", "raw", "HC3_balanced.csv")
 
 #' Load the raw essays CSV and return a tidy tibble.
 #'
@@ -22,23 +22,18 @@ DEFAULT_RAW_PATH <- file.path("data", "raw", "AI_Human.csv")
 load_essays <- function(path = DEFAULT_RAW_PATH) {
   if (!file.exists(path)) {
     stop(sprintf(
-      "Could not find dataset at %s. Download it from Kaggle and place it at data/raw/AI_Human.csv.",
-      path
-    ))
+  "Could not find dataset at %s. Download HC3_balanced.csv from HuggingFace and place it at data/raw/HC3_balanced.csv.",
+  path
+))
   }
 
   df <- readr::read_csv(path, show_col_types = FALSE)
   names(df) <- tolower(trimws(names(df)))
 
-  # Some Kaggle versions ship the label under a different name.
-  if (!"generated" %in% names(df)) {
-    for (alt in c("label", "is_ai", "ai_generated")) {
-      if (alt %in% names(df)) {
-        df <- dplyr::rename(df, generated = !!alt)
-        break
-      }
-    }
-  }
+# Rename 'label' to 'generated' if needed (HC3 format)
+if (!"generated" %in% names(df) && "label" %in% names(df)) {
+  df <- dplyr::rename(df, generated = label)
+}
 
   if (!all(c("text", "generated") %in% names(df))) {
     stop(sprintf(
