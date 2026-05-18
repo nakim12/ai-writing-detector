@@ -1,7 +1,7 @@
 # Loading the Human-vs-AI essays dataset and producing a stratified split.
 #
 # The dataset is expected to live at data/raw/AI_Human.csv (downloaded
-# manually from Kaggle). The loader normalizes column names so the rest of
+# manually from HuggingFace). The loader normalizes column names so the rest of
 # the codebase can rely on `text` and `generated` being present.
 
 suppressPackageStartupMessages({
