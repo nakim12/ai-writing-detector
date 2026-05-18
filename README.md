@@ -6,7 +6,7 @@ A PSTAT 134 group project that builds NLP classifiers in R to predict whether a 
 
 ## Project Overview
 
-We use the [Human vs AI Generated Essays](https://www.kaggle.com/datasets/navjotkaushal/human-vs-ai-generated-essays) dataset from Kaggle (2,750 essays, perfectly balanced between human and AI). The goal is primarily **predictive** — given a new essay, predict whether it is AI-generated — with a secondary **descriptive** goal of identifying linguistic features that distinguish AI text from human text.
+We use a cleaned version of the dataset [HC3](https://huggingface.co/datasets/Hello-SimpleAI/HC3) dataset from HuggingFace (2,750 essays, perfectly balanced between human and AI). The goal is primarily **predictive** — given a new essay, predict whether it is AI-generated — with a secondary **descriptive** goal of identifying linguistic features that distinguish AI text from human text.
 
 We use the [tidymodels](https://www.tidymodels.org/) ecosystem (with [`textrecipes`](https://textrecipes.tidymodels.org/) for TF-IDF) so that vectorization happens inside the modeling workflow and is fit only on the training fold during cross-validation.
 
@@ -62,7 +62,7 @@ This installs `tidyverse`, `here`, `tidymodels`, `textrecipes`, `glmnet`,
 
 ### 3. Download the data
 
-Download the dataset from [Kaggle](https://www.kaggle.com/datasets/navjotkaushal/human-vs-ai-generated-essays) and place the CSV at:
+Download the dataset from [HuggingFace](https://huggingface.co/datasets/Hello-SimpleAI/HC3) and place the CSV at:
 
 ```
 data/raw/AI_Human.csv
