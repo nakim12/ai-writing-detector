@@ -30,7 +30,7 @@ theme_set(theme_minimal(base_size = 12))
 
 ```{r}
 #| label: load
-df <- load_essays(here::here("data", "raw", "AI_Human.csv"))
+df <- load_essays(here::here("data", "raw", "HC3_Balanced.csv"))
 dim(df)
 ```
 
@@ -40,7 +40,7 @@ head(df)
 
 ## Class balance
 
-The dataset is intentionally balanced — confirm the 50/50 split is preserved.
+The dataset was intentionally balanced during preprocessing – confirm the 50/50 split is preserved.
 
 ```{r}
 #| label: class-balance
@@ -48,6 +48,44 @@ df |>
   count(generated) |>
   mutate(pct = n / sum(n))
 ```
+
+The dataset is confirmed to be 50% human generated and 50% AI, with 26394 excerpts of each type.
+
+## Checking for duplicated messages
+
+```{r}
+#| label: duplicates
+# Total duplicate rows
+sum(duplicated(df$text))
+
+# As a percentage
+mean(duplicated(df$text)) * 100
+
+# See examples of duplicated text
+df |>
+  filter(duplicated(text) | duplicated(text, fromLast = TRUE)) |>
+  arrange(text) |>
+  select(generated, text) |>
+  head(20)
+```
+
+All duplicates are within class, meaning it is redundant data rather than a data quality issue.
+
+Remove duplicates:
+
+```{r}
+df <- df |>
+  distinct(text, .keep_all = TRUE)
+```
+
+```{r}
+#| label: class-balance-updated
+df |>
+  count(generated) |>
+  mutate(pct = n / sum(n))
+```
+
+With the duplicates removed, the data is no longer perfectly balanced but very close. There is now a 49/51 split, which is still usable for our project.
 
 ## Length distributions
 
@@ -62,20 +100,34 @@ df_len <- df |>
 ggplot(df_len, aes(x = n_words, fill = generated)) +
   geom_histogram(bins = 50, position = "identity", alpha = 0.6) +
   scale_x_continuous(labels = comma) +
-  labs(title = "Word count by class", x = "words", y = "essays")
+  labs(title = "Word Count by Class", x = "words", y = "essays")
 ```
+
+Visualizing data without extreme human excerpt outlier of 6033.
 
 ```{r}
 ggplot(df_len, aes(x = generated, y = n_words, fill = generated)) +
   geom_boxplot(alpha = 0.7, show.legend = FALSE) +
+  coord_cartesian(ylim = c(0, 2000)) +
   labs(title = "Word count, boxplot", x = NULL, y = "words")
 ```
 
-## Stylometric & readability features
+```{r}
+df_len |>
+  group_by(generated) |>
+  summarise(
+    median_words = median(n_words),
+    mean_words = mean(n_words),
+    min_words = min(n_words),
+    max_words = max(n_words)
+  )
+```
 
-The teammate plan calls for readability indices (Flesch-Kincaid, etc.) in
-addition to the simple hand-crafted features, so `stylometric_features()` is
-called with `include_readability = TRUE`.
+The word counts of the excerpts from AI and human are relatively balanced, with the AI count peaking at slightly larger count than the human excerpts. The means of the word counts are extremely similar at 167.79 words for the human written essays and 179.79 words for the AI generated essays. There is one outlier for the human data, with an extreme maximum of 6033 words and the human data has a larger distribution, even without the outliers.
+
+## Stylometric & Readability features
+
+The teammate plan calls for readability indices (Flesch-Kincaid, etc.) in addition to the simple hand-crafted features, so `stylometric_features()` is called with `include_readability = TRUE`.
 
 ```{r}
 #| label: stylometric
@@ -86,7 +138,8 @@ style |>
   group_by(generated) |>
   summarise(across(where(is.numeric), mean), .groups = "drop") |>
   pivot_longer(-generated, names_to = "feature", values_to = "mean") |>
-  pivot_wider(names_from = generated, values_from = mean)
+  pivot_wider(names_from = generated, values_from = mean) |>
+  mutate(across(where(is.numeric), \(x) round(x, 4)))
 ```
 
 ```{r}
@@ -103,8 +156,13 @@ style |>
   labs(x = NULL, y = NULL)
 ```
 
+We get many interesting results from this stylometric analysis with a couple, in particular standing out. The difference in type token ratio (0.647 for human compared to 0.522 for AI) indicates that human writing uses a more diverse vocabulary relative to its length, while AI tends to reuse words more. The average sentence length (19.5 words compared to 22.5 words) shows that AI writes slightly longer sentences on average. The average word length is very similar between both classes (4.38 for human vs 4.60 for AI), so word length alone will likely not be a very useful feature. The Flesch readability scores (58.8 for human and 47.2 for AI) reveal that human writing scores as easier to read, while AI writing is more complex and formal. The Flesch-Kincaid grade level confirms this, indicating that human writing sits around 10th to 11th grade reading level while AI writing is closer to a college freshman level. The automated readability index shows an even wider gap, with AI text scoring nearly 4 grade levels higher than human text. The number of characters, words, sentences, punctuation rate, comman, rate and uppercase rate are likely too similar to be useful in distinguishing human from AI writing.
+
 ## Notes for the team
 
-- Are the two classes separable on simple length / punctuation features alone?
-- Which features look most promising as descriptive variables for the report?
-- Anything weird (extremely short essays, duplicated text, encoding issues) we should clean before modeling?
+-   Are the two classes separable on simple length / punctuation features alone?
+    -   No.
+-   Which features look most promising as descriptive variables for the report?
+    -   Type token ratio, Flesch readability scores, Flesch-Kincaid grade level, and the ARI.
+-   Anything weird (extremely short essays, duplicated text, encoding issues) we should clean before modeling?
+    -   Extremely short essays (\<50 words) were removed in pre-processing and duplicated texts were removed in EDA.
