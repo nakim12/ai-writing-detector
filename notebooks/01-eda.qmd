@@ -158,6 +158,53 @@ style |>
 
 We get many interesting results from this stylometric analysis with a couple, in particular standing out. The difference in type token ratio (0.647 for human compared to 0.522 for AI) indicates that human writing uses a more diverse vocabulary relative to its length, while AI tends to reuse words more. The average sentence length (19.5 words compared to 22.5 words) shows that AI writes slightly longer sentences on average. The average word length is very similar between both classes (4.38 for human vs 4.60 for AI), so word length alone will likely not be a very useful feature. The Flesch readability scores (58.8 for human and 47.2 for AI) reveal that human writing scores as easier to read, while AI writing is more complex and formal. The Flesch-Kincaid grade level confirms this, indicating that human writing sits around 10th to 11th grade reading level while AI writing is closer to a college freshman level. The automated readability index shows an even wider gap, with AI text scoring nearly 4 grade levels higher than human text. The number of characters, words, sentences, punctuation rate, comman, rate and uppercase rate are likely too similar to be useful in distinguishing human from AI writing.
 
+## Wordclouds to check most common words
+```{r}
+#| label: wordcloud-setup
+library(tidytext)
+library(wordcloud)
+library(stopwords)
+
+# Tokenize and remove stop words
+words <- df |>
+  unnest_tokens(word, text) |>
+  filter(!word %in% stopwords::stopwords("en")) |>
+  filter(nchar(word) > 2) |>        # remove very short tokens
+  filter(!grepl("^[0-9]+$", word))  # remove pure numbers
+
+human_words <- words |>
+  filter(generated == "human") |>
+  count(word, sort = TRUE) |>
+  slice_head(n = 150)
+
+ai_words <- words |>
+  filter(generated == "ai") |>
+  count(word, sort = TRUE) |>
+  slice_head(n = 150)
+```
+Human wordcloud:
+```{r}
+#| label: wordcloud-human
+#| fig-cap: "Most common words in human writing"
+wordcloud(words = human_words$word,
+          freq = human_words$n,
+          max.words = 150,
+          random.order = FALSE,
+          colors = c("#F0997B", "#D85A30", "#993C1D"),
+          scale = c(4, 0.5))
+```
+AI wordcloud:
+```{r}
+#| label: wordcloud-ai
+#| fig-cap: "Most common words in AI writing"
+wordcloud(words = ai_words$word,
+          freq = ai_words$n,
+          max.words = 150,
+          random.order = FALSE,
+          colors = c("#5DCAA5", "#1D9E75", "#0F6E56"),
+          scale = c(4, 0.5))
+```
+Both clouds share words like "can", "people", "also", "make", "may", "different", "one", "many" — these are generic functional words that don't help distinguish the two classes, which is expected. However, the human wordcloud has more content words like "time", "use", "work", "good", "new", "world", "life", while the AI wordcloud has more abstract words like "model", "data", "information", "system", "research". This suggests that the AI writing may be more focused on technical or academic topics, while the human writing is more varied and includes more everyday language. This confirms the findings from the stylometric features that AI writing is more formal and complex, while human writing is more diverse and easier to read.
 ## Notes for the team
 
 -   Are the two classes separable on simple length / punctuation features alone?
@@ -165,4 +212,4 @@ We get many interesting results from this stylometric analysis with a couple, in
 -   Which features look most promising as descriptive variables for the report?
     -   Type token ratio, Flesch readability scores, Flesch-Kincaid grade level, and the ARI.
 -   Anything weird (extremely short essays, duplicated text, encoding issues) we should clean before modeling?
-    -   Extremely short essays (\<50 words) were removed in pre-processing and duplicated texts were removed in EDA.
+    -   Extremely short essays (\<50 words) were removed in pre-processing and duplicated texts were removed in EDA.DA.
