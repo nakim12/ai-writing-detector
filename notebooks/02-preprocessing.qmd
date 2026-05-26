@@ -26,7 +26,7 @@ library(rsample)
 ## Load and basic cleaning
 
 ```{r}
-df <- load_essays(here::here("data", "raw", "AI_Human.csv")) |>
+df <- load_essays(here::here("data", "raw", "HC3_Balanced.csv")) |>
   mutate(text = stringr::str_squish(text)) |>
   filter(nchar(text) > 0) |>
   distinct(text, .keep_all = TRUE)
