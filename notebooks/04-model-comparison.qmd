@@ -148,22 +148,22 @@ if (file.exists(tune_res_path)) {
   cat("Tuning complete and saved\n")
 }
 
-best_params <- select_best(tune_res, metric = "f_meas")
+best_params <- select_best(tune_res, metric = "roc_auc")
 best_params
 ```
-The best performing model was at a tree depth of 12 (max of range tested). We can look at a plot that shows how F1 changes as tree depth increase to check if we need to rerun the model with a wider range.
+The best performing model was at a tree depth of 12 (max of range tested). We can look at a plot that shows how ROC AUC changes as tree depth increase to check if we need to rerun the model with a wider range.
 
 ```{r}
 tune_res |>
   collect_metrics() |>
-  filter(.metric == "f_meas") |>
+  filter(.metric == "roc_auc") |>
   ggplot(aes(x = tree_depth, y = mean, color = factor(learn_rate), group = factor(learn_rate))) +
   geom_line() +
   geom_point() +
-  labs(title = "XGBoost tuning: F1 by tree depth and learn rate",
-       x = "Tree Depth", y = "CV F1", color = "Learn Rate")
+  labs(title = "XGBoost tuning: ROC_AUC by tree depth and learn rate",
+       x = "Tree Depth", y = "CV ROC AUC", color = "Learn Rate")
 ```
-Plot shows that F1 starts to plateau at a tree depth of 12. Rerun isn't necessary for risk of over-fitting.
+Plot shows that ROC AUC starts to plateau at a tree depth of 12. Rerun isn't necessary for risk of over-fitting.
 
 ```{r}
 final_wf <- finalize_workflow(tune_wf, best_params)
