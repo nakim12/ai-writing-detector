@@ -25,6 +25,7 @@ library(tidymodels)
 library(textrecipes)
 library(discrim)
 library(vip)
+library(kernlab)
 
 tidymodels_prefer()
 ```
@@ -52,55 +53,117 @@ recipe, so the comparison is fair.
 
 ```{r}
 folds <- cv_folds(train_df)
-rec_tfidf <- tfidf_recipe(generated ~ text, data = train_df)
+rec_tfidf <- tfidf_recipe(generated ~ text, data = train_df, max_tokens = 1000)
 
 specs <- list(
   logreg        = logistic_reg(penalty = 0.01, mixture = 0)         |> set_engine("glmnet")    |> set_mode("classification"),
   naive_bayes   = naive_Bayes()                                     |> set_engine("naivebayes")|> set_mode("classification"),
-  linear_svm    = svm_linear()                                      |> set_engine("LiblineaR") |> set_mode("classification"),
+  linear_svm    = svm_linear(cost = 1)                                      |> set_engine("LiblineaR") |> set_mode("classification"),
   random_forest = rand_forest(trees = 500)                          |> set_engine("ranger")    |> set_mode("classification"),
   xgboost       = boost_tree(trees = 500, learn_rate = 0.05)        |> set_engine("xgboost")   |> set_mode("classification")
 )
 
-results <- imap_dfr(specs, function(spec, name) {
-  wf <- workflow() |> add_recipe(rec_tfidf) |> add_model(spec)
-  cv_summary(wf, folds) |> mutate(model = name)
-})
+models_dir <- here::here("models")
+dir.create(models_dir, showWarnings = FALSE, recursive = TRUE)
+results_path <- here::here("models", "cv_results.rds")
 
+# Load existing results if they exist, otherwise start fresh
+if (file.exists(results_path)) {
+  results <- readRDS(results_path)
+  cat("Loaded existing results for:", paste(unique(results$model), collapse = ", "), "\n")
+} else {
+  results <- tibble()
+}
+
+# Only run models that haven't been completed yet
+remaining <- setdiff(names(specs), unique(results$model))
+cat("Models remaining:", paste(remaining, collapse = ", "), "\n")
+
+for (name in remaining) {
+  cat("\n--- Starting:", name, "at", format(Sys.time(), "%H:%M:%S"), "---\n")
+  
+  spec <- specs[[name]]
+  wf <- workflow() |> add_recipe(rec_tfidf) |> add_model(spec)
+  
+  tryCatch({
+    # SVM can't do ROC-AUC, use accuracy and F1 only
+    if (name == "linear_svm") {
+      res <- cv_summary(wf, folds, metrics = metric_set(accuracy, f_meas)) |> 
+        mutate(model = name)
+    } else {
+      res <- cv_summary(wf, folds) |> mutate(model = name)
+    }
+    results <- bind_rows(results, res)
+    saveRDS(results, results_path)
+    cat("✓ Finished:", name, "at", format(Sys.time(), "%H:%M:%S"), "\n")
+    print(res |> select(metric, mean, std_err))
+  }, error = function(e) {
+    cat("✗ Failed:", name, "\n")
+    cat("  Error:", conditionMessage(e), "\n")
+  })
+}
+
+# Final comparison table
 results |>
   select(model, metric, mean, std_err) |>
   pivot_wider(id_cols = metric, names_from = model, values_from = mean)
 ```
+Linear SMV model was ran without calculating ROC-AUC due to LiblineaR engine limitation. Re-run with AUC-ROC is not necessary as it falls below both Random Forest and XGBoost in both accuracy and F1. 
+
+XGBoost has performed the best of the 5 models in all metrics. This will be tuned to find the best overall model.
 
 ## Pick the best model and tune it
 
-Edit `BEST_NAME` once you know which candidate to take forward. The example
-below tunes `penalty` for the regularized logistic regression.
+Tune XGBoost model
 
 ```{r}
-BEST_NAME <- "logreg"
+BEST_NAME <- "xgboost"
 
-tune_spec <- logistic_reg(penalty = tune(), mixture = 0) |>
-  set_engine("glmnet") |>
+tune_spec <- boost_tree(trees = 500, learn_rate = tune(), tree_depth = tune()) |>
+  set_engine("xgboost") |>
   set_mode("classification")
 
 tune_wf <- workflow() |>
   add_recipe(rec_tfidf) |>
   add_model(tune_spec)
 
-penalty_grid <- grid_regular(penalty(range = c(-4, 0)), levels = 8)
+xgb_grid <- grid_regular(learn_rate(range = c(-3, -1)),
+                         tree_depth(range = c(3,12)),
+                         levels = 5)
 
-tune_res <- tune::tune_grid(
-  tune_wf,
-  resamples = folds,
-  grid      = penalty_grid,
-  metrics   = cv_metrics(),
-  control   = control_grid(event_level = "second")
-)
+tune_res_path <- here::here("models", "tune_res.rds")
+
+if (file.exists(tune_res_path)) {
+  tune_res <- readRDS(tune_res_path)
+  cat("Loaded saved tuning results\n")
+} else {
+  tune_res <- tune::tune_grid(
+    tune_wf,
+    resamples = folds,
+    grid      = xgb_grid,
+    metrics   = cv_metrics(),
+    control   = control_grid(event_level = "second")
+  )
+  saveRDS(tune_res, tune_res_path)
+  cat("Tuning complete and saved\n")
+}
 
 best_params <- select_best(tune_res, metric = "f_meas")
 best_params
 ```
+The best performing model was at a tree depth of 12 (max of range tested). We can look at a plot that shows how F1 changes as tree depth increase to check if we need to rerun the model with a wider range.
+
+```{r}
+tune_res |>
+  collect_metrics() |>
+  filter(.metric == "f_meas") |>
+  ggplot(aes(x = tree_depth, y = mean, color = factor(learn_rate), group = factor(learn_rate))) +
+  geom_line() +
+  geom_point() +
+  labs(title = "XGBoost tuning: F1 by tree depth and learn rate",
+       x = "Tree Depth", y = "CV F1", color = "Learn Rate")
+```
+Plot shows that F1 starts to plateau at a tree depth of 12. Rerun isn't necessary for risk of over-fitting.
 
 ```{r}
 final_wf <- finalize_workflow(tune_wf, best_params)
