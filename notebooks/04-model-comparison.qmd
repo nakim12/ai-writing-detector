@@ -170,6 +170,12 @@ final_wf <- finalize_workflow(tune_wf, best_params)
 final_fit <- fit(final_wf, data = train_df)
 ```
 
+```{r}
+final_fit_path <- here::here("models", "final_fit.rds")
+saveRDS(final_fit, final_fit_path)
+```
+
+
 ## Final evaluation on the held-out test set
 
 This is the **only** time we touch the test set.
