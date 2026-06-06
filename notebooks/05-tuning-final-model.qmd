@@ -266,16 +266,33 @@ tibble(
 )
 ```
 
-**Interpretation (fill in with your rendered numbers):**
+The paragraph below is generated from the rendered numbers, so it stays in
+sync with whatever the model actually produced — copy it straight into the
+report.
 
-- Which error type dominates — false positives (flagging human writing as AI)
-  or false negatives (missing AI writing)? For an AI-detection tool, false
-  positives are usually the more damaging error (wrongly accusing a person),
-  so note where this model lands.
-- Compare these test-set numbers to the cross-validation ROC-AUC above. A large
-  drop from CV to test would signal overfitting to the tuning folds.
-- Compare against the *untuned* XGBoost from `04-model-comparison.qmd` to show
-  what the joint TF-IDF + model tuning bought us (next section).
+```{r}
+#| label: cm-narrative
+#| output: asis
+test_acc <- report$metrics |> filter(.metric == "accuracy") |> pull(.estimate)
+test_auc <- report$metrics |> filter(.metric == "roc_auc")  |> pull(.estimate)
+cv_auc   <- collect_metrics(tune_res) |> filter(.metric == "roc_auc") |>
+  slice_max(mean, n = 1) |> pull(mean)
+prec <- tp / (tp + fp)
+rec  <- tp / (tp + fn)
+dom_err <- if (fp >= fn) {
+  sprintf("false positives (%d human essays flagged as AI) slightly outnumber the false negatives (%d AI essays missed)", fp, fn)
+} else {
+  sprintf("false negatives (%d AI essays missed) slightly outnumber the false positives (%d human essays flagged as AI)", fn, fp)
+}
+gap <- cv_auc - test_auc
+
+cat(sprintf(
+"On the held-out test set the final model reaches **%.1f%% accuracy** and a **ROC-AUC of %.3f**, with precision %.3f and recall %.3f for the AI class. Among its mistakes, %s — relevant because for an AI-detection tool a false positive (wrongly accusing a human author) is usually the costlier error. The cross-validation ROC-AUC during tuning was %.3f, so the test-set score is %s the CV estimate (a gap of %+.3f), which gives %s that the model is not badly overfit to the tuning folds.",
+100 * test_acc, test_auc, prec, rec, dom_err, cv_auc,
+ifelse(gap > 0, "below", "above"), -gap,
+ifelse(abs(gap) < 0.02, "reassurance", "some cause for caution")
+))
+```
 
 ## Did tuning help? (vs. the untuned comparison model)
 
@@ -302,6 +319,21 @@ bind_rows(
   pivot_wider(names_from = model, values_from = .estimate)
 ```
 
+```{r}
+#| label: tuning-gain
+#| output: asis
+base_auc  <- baseline_report$metrics |> filter(.metric == "roc_auc") |> pull(.estimate)
+tuned_auc <- report$metrics          |> filter(.metric == "roc_auc") |> pull(.estimate)
+delta <- tuned_auc - base_auc
+cat(sprintf(
+"Tuning the TF-IDF representation and XGBoost jointly changed test-set ROC-AUC by %+.3f (from %.3f untuned to %.3f tuned). %s",
+delta, base_auc, tuned_auc,
+if (delta > 0.002) "The joint search delivered a measurable improvement." else
+if (delta < -0.002) "The untuned defaults were already competitive here; the gain from tuning is negligible, which itself is worth reporting." else
+"Both are essentially tied, suggesting the problem is easy enough that the default settings already capture most of the signal."
+))
+```
+
 ## Persist the final tuned model
 
 ```{r}
@@ -313,10 +345,22 @@ saveRDS(final_fit, file = file.path(models_dir, "xgboost_tuned_final.rds"))
 
 ## Notes for the report
 
-- Record the winning hyperparameters (`best_params`) and explain the trade-offs
-  (e.g., did a larger vocabulary or bigrams help?).
-- State the final held-out test metrics as the headline result.
-- Use the confusion-matrix breakdown to discuss *which* mistakes the model
-  makes, and connect it to the fair-evaluation / overfitting concerns from the
-  project memo.
+- **Headline result:** state the final held-out test metrics (accuracy and
+  ROC-AUC) as the top-line finding. As a reference point, a single untuned
+  unigram XGBoost already reaches ~0.94 accuracy / ~0.99 ROC-AUC on this test
+  set, so the task is highly separable — frame the tuned model as confirming
+  and refining that rather than as a dramatic jump.
+- **Winning hyperparameters:** record `best_params` and explain the trade-offs
+  — did a larger vocabulary or adding bigrams (`num_tokens = 2`) actually help,
+  or did the simpler representation win? If unigrams win, that's a clean,
+  defensible result.
+- **Which mistakes:** use the confusion-matrix breakdown to discuss the error
+  profile (false positives vs. false negatives) and connect it to the
+  fair-evaluation / overfitting concerns from the project memo.
+- **Tie back to EDA:** the most informative TF-IDF features (`vip::vi()` above)
+  should echo the EDA in `01-eda.qmd` — e.g., AI text leaning on more abstract,
+  technical vocabulary ("model", "data", "system") and humans on more everyday
+  words. If the top features line up with the descriptive findings, that's
+  evidence the model is learning genuine linguistic differences rather than
+  dataset artifacts.
 ```
