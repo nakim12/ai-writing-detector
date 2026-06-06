@@ -1,0 +1,318 @@
+---
+title: "05 — Hyperparameter Tuning & Final Model"
+author: "Nathan Kim — PSTAT 134 — AI Writing Detector"
+format:
+  html:
+    toc: true
+    toc-location: left
+    embed-resources: true
+    theme: simplex
+    code-fold: show
+execute:
+  warning: false
+  message: false
+---
+
+This notebook covers **Section 6** of the project outline: tuning the
+best-performing model from the comparison in `04-model-comparison.qmd`
+(XGBoost), tuning the **TF-IDF parameters alongside the model parameters**,
+evaluating the final model on the held-out test set, and analyzing the
+confusion matrix.
+
+```{r}
+#| label: setup
+here::i_am("notebooks/05-tuning-final-model.qmd")
+
+source(here::here("R", "features.R"))
+source(here::here("R", "evaluation.R"))
+
+library(tidyverse)
+library(tidymodels)
+library(textrecipes)
+
+tidymodels_prefer()
+set.seed(42)
+```
+
+## Load the processed train / test splits
+
+These were produced in `02-preprocessing.qmd` and are committed under
+`data/processed/`. The test set is **only** touched once, at the very end.
+
+```{r}
+#| label: load
+train_df <- readr::read_csv(
+  here::here("data", "processed", "train.csv"),
+  show_col_types = FALSE
+) |>
+  mutate(generated = factor(generated, levels = c("human", "ai")))
+
+test_df <- readr::read_csv(
+  here::here("data", "processed", "test.csv"),
+  show_col_types = FALSE
+) |>
+  mutate(generated = factor(generated, levels = c("human", "ai")))
+
+c(train = nrow(train_df), test = nrow(test_df))
+```
+
+## A tunable workflow (TF-IDF parameters + model parameters)
+
+The model comparison fixed the recipe (`max_tokens = 1000`, default n-grams)
+and only varied the XGBoost parameters. Section 6 calls for tuning the TF-IDF
+representation jointly with the model, so here both sets of knobs carry
+`tune()`:
+
+- **TF-IDF:** `max_tokens` (vocabulary size) and `num_tokens` (max n-gram length).
+- **XGBoost:** `learn_rate` and `tree_depth` (`trees` fixed at 500, matching the comparison).
+
+Keeping the TF-IDF steps inside the recipe means the vocabulary is still
+learned only from each analysis fold — no leakage during tuning.
+
+```{r}
+#| label: tunable-workflow
+tune_rec <- recipe(generated ~ text, data = train_df) |>
+  step_tokenize(text) |>
+  step_stopwords(text) |>
+  step_ngram(text, num_tokens = tune(), min_num_tokens = 1L) |>
+  step_tokenfilter(text, max_tokens = tune(), min_times = 2L) |>
+  step_tfidf(text)
+
+xgb_spec <- boost_tree(
+  trees      = 500,
+  learn_rate = tune(),
+  tree_depth = tune()
+) |>
+  set_engine("xgboost") |>
+  set_mode("classification")
+
+tune_wf <- workflow() |>
+  add_recipe(tune_rec) |>
+  add_model(xgb_spec)
+```
+
+## Search space
+
+We use a randomized search (a space-filling Latin hypercube) rather than a
+full grid: with four parameters a full grid explodes combinatorially, and a
+space-filling design covers the space far more efficiently. Ranges:
+
+- `max_tokens`: 500–3000 terms
+- `num_tokens` (n-gram length): 1–2
+- `learn_rate`: 0.001–0.1 (log scale)
+- `tree_depth`: 3–12
+
+```{r}
+#| label: search-space
+params <- extract_parameter_set_dials(tune_wf) |>
+  update(
+    max_tokens = max_tokens(range = c(500L, 3000L)),
+    num_tokens = num_tokens(range = c(1L, 2L)),
+    learn_rate = learn_rate(range = c(-3, -1)),
+    tree_depth = tree_depth(range = c(3L, 12L))
+  )
+
+set.seed(42)
+xgb_grid <- grid_latin_hypercube(params, size = 20)
+xgb_grid
+```
+
+## Cross-validated tuning
+
+Tuning XGBoost + TF-IDF over the full ~40k-row training set is expensive, so
+we tune on a stratified subsample and then refit the chosen configuration on
+the **full** training set. Set `TUNE_SAMPLE_N <- nrow(train_df)` to tune on
+everything if you have the compute/time.
+
+The folds reuse `cv_folds()` (seed 42, stratified 5-fold) so the evaluation is
+consistent with the rest of the project. Results are cached to
+`models/tune_tfidf_xgb.rds` so a re-render doesn't re-run the search.
+
+```{r}
+#| label: tuning
+TUNE_SAMPLE_N <- 8000L
+
+tune_train <- if (TUNE_SAMPLE_N < nrow(train_df)) {
+  set.seed(42)
+  train_df |>
+    group_by(generated) |>
+    slice_sample(n = ceiling(TUNE_SAMPLE_N / 2)) |>
+    ungroup()
+} else {
+  train_df
+}
+
+folds <- cv_folds(tune_train)
+
+tune_path <- here::here("models", "tune_tfidf_xgb.rds")
+
+if (file.exists(tune_path)) {
+  tune_res <- readRDS(tune_path)
+  message("Loaded cached tuning results from ", tune_path)
+} else {
+  # XGBoost already uses multiple threads per fit; parallelize across resamples
+  # too if doParallel is available.
+  if (requireNamespace("doParallel", quietly = TRUE)) {
+    cl <- parallel::makePSOCKcluster(max(1, parallel::detectCores() - 1))
+    doParallel::registerDoParallel(cl)
+    on.exit(parallel::stopCluster(cl), add = TRUE)
+  }
+
+  tune_res <- tune::tune_grid(
+    tune_wf,
+    resamples = folds,
+    grid      = xgb_grid,
+    metrics   = cv_metrics(),
+    control   = control_grid(event_level = "second", save_pred = FALSE)
+  )
+  saveRDS(tune_res, tune_path)
+  message("Tuning complete; cached to ", tune_path)
+}
+```
+
+### Tuning results
+
+```{r}
+#| label: tuning-results
+collect_metrics(tune_res) |>
+  filter(.metric == "roc_auc") |>
+  arrange(desc(mean)) |>
+  select(max_tokens, num_tokens, learn_rate, tree_depth, mean, std_err) |>
+  head(10)
+```
+
+```{r}
+#| label: tuning-plot
+#| fig-width: 9
+#| fig-height: 6
+autoplot(tune_res, metric = "roc_auc") +
+  labs(title = "XGBoost + TF-IDF tuning (CV ROC-AUC)")
+```
+
+```{r}
+#| label: best-params
+best_params <- select_best(tune_res, metric = "roc_auc")
+best_params
+```
+
+## Fit the final model on the full training set
+
+```{r}
+#| label: final-fit
+final_wf <- finalize_workflow(tune_wf, best_params)
+
+final_fit <- fit(final_wf, data = train_df)
+```
+
+## Final evaluation on the held-out test set
+
+This is the **only** time the test set is used.
+
+```{r}
+#| label: test-eval
+report <- test_set_report(final_fit, test_df)
+report$metrics
+```
+
+## Confusion matrix analysis
+
+```{r}
+#| label: confusion-matrix
+fig_dir <- here::here("reports", "figures")
+dir.create(fig_dir, showWarnings = FALSE, recursive = TRUE)
+
+cm <- report$confusion_matrix
+cm
+
+cm_plot <- autoplot(cm, type = "heatmap") +
+  labs(title = "Confusion matrix — tuned XGBoost, held-out test set")
+
+ggplot2::ggsave(
+  filename = file.path(fig_dir, "confusion_matrix_tuned.png"),
+  plot = cm_plot, width = 5, height = 4, dpi = 150
+)
+
+cm_plot
+```
+
+The table below derives precision, recall, specificity, and the error
+breakdown directly from the confusion matrix, treating **AI as the positive
+class**.
+
+```{r}
+#| label: cm-breakdown
+cm_counts <- cm$table
+tp <- cm_counts["ai", "ai"]
+fp <- cm_counts["ai", "human"]
+fn <- cm_counts["human", "ai"]
+tn <- cm_counts["human", "human"]
+
+tibble(
+  metric = c("True positives (AI called AI)",
+             "False positives (human called AI)",
+             "False negatives (AI called human)",
+             "True negatives (human called human)",
+             "Precision (AI)", "Recall / sensitivity (AI)",
+             "Specificity (human)", "Accuracy"),
+  value = c(tp, fp, fn, tn,
+            round(tp / (tp + fp), 4),
+            round(tp / (tp + fn), 4),
+            round(tn / (tn + fp), 4),
+            round((tp + tn) / (tp + fp + fn + tn), 4))
+)
+```
+
+**Interpretation (fill in with your rendered numbers):**
+
+- Which error type dominates — false positives (flagging human writing as AI)
+  or false negatives (missing AI writing)? For an AI-detection tool, false
+  positives are usually the more damaging error (wrongly accusing a person),
+  so note where this model lands.
+- Compare these test-set numbers to the cross-validation ROC-AUC above. A large
+  drop from CV to test would signal overfitting to the tuning folds.
+- Compare against the *untuned* XGBoost from `04-model-comparison.qmd` to show
+  what the joint TF-IDF + model tuning bought us (next section).
+
+## Did tuning help? (vs. the untuned comparison model)
+
+```{r}
+#| label: compare-untuned
+# Baseline: the recipe/model settings used in 04-model-comparison.qmd
+baseline_rec <- tfidf_recipe(generated ~ text, data = train_df, max_tokens = 1000)
+baseline_spec <- boost_tree(trees = 500, learn_rate = 0.05) |>
+  set_engine("xgboost") |>
+  set_mode("classification")
+
+baseline_fit <- workflow() |>
+  add_recipe(baseline_rec) |>
+  add_model(baseline_spec) |>
+  fit(data = train_df)
+
+baseline_report <- test_set_report(baseline_fit, test_df)
+
+bind_rows(
+  baseline_report$metrics |> mutate(model = "untuned (nb 04 settings)"),
+  report$metrics          |> mutate(model = "tuned (this notebook)")
+) |>
+  select(model, .metric, .estimate) |>
+  pivot_wider(names_from = model, values_from = .estimate)
+```
+
+## Persist the final tuned model
+
+```{r}
+#| label: save-model
+models_dir <- here::here("models")
+dir.create(models_dir, showWarnings = FALSE, recursive = TRUE)
+saveRDS(final_fit, file = file.path(models_dir, "xgboost_tuned_final.rds"))
+```
+
+## Notes for the report
+
+- Record the winning hyperparameters (`best_params`) and explain the trade-offs
+  (e.g., did a larger vocabulary or bigrams help?).
+- State the final held-out test metrics as the headline result.
+- Use the confusion-matrix breakdown to discuss *which* mistakes the model
+  makes, and connect it to the fair-evaluation / overfitting concerns from the
+  project memo.
+```

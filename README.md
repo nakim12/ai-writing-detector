@@ -25,10 +25,11 @@ ai-writing-detector/
 │   ├── raw/                    Original Kaggle CSV (gitignored)
 │   └── processed/              Cleaned / split data (gitignored)
 ├── notebooks/
-│   ├── 01-eda.qmd              Exploratory data analysis
-│   ├── 02-preprocessing.qmd    Cleaning + train/test split
-│   ├── 03-baseline-models.qmd  Logistic regression and Naive Bayes
-│   └── 04-model-comparison.qmd Cross-validated model comparison + tuning
+│   ├── 01-eda.qmd                EDA (length, stylometry, readability, word clouds)
+│   ├── 02-preprocessing.qmd      Cleaning + train/test split
+│   ├── 03-baseline-models.qmd    Dummy, logistic regression, Naive Bayes
+│   ├── 04-model-comparison.qmd   Cross-validated comparison of 5 models
+│   └── 05-tuning-final-model.qmd Joint TF-IDF + XGBoost tuning, final test-set eval
 ├── R/                          Reusable R helpers
 │   ├── data.R                  load_essays(), stratified_split()
 │   ├── features.R              tfidf_recipe(), stylometric_features()
@@ -97,7 +98,7 @@ The full plan lives in [`Project-Memo.qmd`](Project-Memo.qmd) and in the team's 
   - *Floor:* majority-class null model (`parsnip::null_model()`) as a sanity-check baseline.
   - *Baselines:* logistic regression (`glmnet`) and Naive Bayes (`naivebayes`).
   - *Comparison:* linear SVM (`LiblineaR`), Random Forest (`ranger`), and boosted trees (`xgboost`).
-- **Tuning:** `tune::tune_grid()` over the regularization penalty (and any other hyperparameters) on the winning model, selected by F-measure on the AI class.
+- **Tuning:** the winning model (XGBoost) is tuned in `05-tuning-final-model.qmd` with a space-filling search over **both** TF-IDF parameters (`max_tokens`, n-gram length) and model parameters (`learn_rate`, `tree_depth`), selected by ROC-AUC on the AI class.
 - **Metrics:** accuracy, ROC-AUC, F-measure, precision, and recall on the AI-positive class, reported as CV mean and standard error so model differences can be judged against noise. Computed via `yardstick`.
 - **Error analysis:** confusion matrix on the held-out test set plus the most informative TF-IDF features (`vip::vi()`) to check that the model is learning real linguistic patterns, not dataset artifacts.
 
