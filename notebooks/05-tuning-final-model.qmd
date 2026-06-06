@@ -140,6 +140,24 @@ The folds reuse `cv_folds()` (seed 42, stratified 5-fold) so the evaluation is
 consistent with the rest of the project. Results are cached to
 `models/tune_tfidf_xgb.rds` so a re-render doesn't re-run the search.
 
+::: {.callout-tip}
+## Quick render
+
+The bigram search (`num_tokens = 2`) over the full 5-fold CV is what makes this
+chunk slow — building and filtering the bigram vocabulary is recomputed for
+every fold/config. On a laptop this can take 10+ minutes. To render quickly,
+dial the budget down:
+
+- set `GRID_SIZE <- 5` (in the *Search space* chunk),
+- set `TUNE_SAMPLE_N <- 1200` (below), and
+- restrict the n-gram range to unigrams by changing `num_tokens` to
+  `num_tokens(range = c(1L, 1L))` in the *Search space* chunk.
+
+Unigram features alone reach ~0.99 ROC-AUC on this dataset, so the quick path
+costs almost nothing in accuracy. Delete the cached `models/tune_tfidf_xgb.rds`
+first if you change these settings, otherwise the old cached run is reused.
+:::
+
 ```{r}
 #| label: tuning
 TUNE_SAMPLE_N <- 2500L
