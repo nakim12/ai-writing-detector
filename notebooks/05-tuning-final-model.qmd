@@ -79,11 +79,11 @@ tune_rec <- recipe(generated ~ text, data = train_df) |>
   step_tfidf(text)
 
 xgb_spec <- boost_tree(
-  trees      = 500,
+  trees      = 300,
   learn_rate = tune(),
   tree_depth = tune()
 ) |>
-  set_engine("xgboost") |>
+  set_engine("xgboost", nthread = parallel::detectCores()) |>
   set_mode("classification")
 
 tune_wf <- workflow() |>
@@ -97,32 +97,44 @@ We use a randomized search (a space-filling Latin hypercube) rather than a
 full grid: with four parameters a full grid explodes combinatorially, and a
 space-filling design covers the space far more efficiently. Ranges:
 
-- `max_tokens`: 500–3000 terms
+- `max_tokens`: 500–2000 terms
 - `num_tokens` (n-gram length): 1–2
-- `learn_rate`: 0.001–0.1 (log scale)
-- `tree_depth`: 3–12
+- `learn_rate`: 0.01–0.1 (log scale)
+- `tree_depth`: 4–10
+
+`GRID_SIZE` controls how many configurations are tried. It's kept modest so
+the notebook finishes in a few minutes; bump it up (and widen the ranges
+above) for a more exhaustive search when you have the compute.
 
 ```{r}
 #| label: search-space
+GRID_SIZE <- 8L
+
 params <- extract_parameter_set_dials(tune_wf) |>
   update(
-    max_tokens = max_tokens(range = c(500L, 3000L)),
+    max_tokens = max_tokens(range = c(500L, 2000L)),
     num_tokens = num_tokens(range = c(1L, 2L)),
-    learn_rate = learn_rate(range = c(-3, -1)),
-    tree_depth = tree_depth(range = c(3L, 12L))
+    learn_rate = learn_rate(range = c(-2, -1)),
+    tree_depth = tree_depth(range = c(4L, 10L))
   )
 
 set.seed(42)
-xgb_grid <- grid_latin_hypercube(params, size = 20)
+xgb_grid <- grid_space_filling(params, size = GRID_SIZE, type = "latin_hypercube")
 xgb_grid
 ```
 
 ## Cross-validated tuning
 
-Tuning XGBoost + TF-IDF over the full ~40k-row training set is expensive, so
-we tune on a stratified subsample and then refit the chosen configuration on
-the **full** training set. Set `TUNE_SAMPLE_N <- nrow(train_df)` to tune on
-everything if you have the compute/time.
+Tuning XGBoost + TF-IDF over the full ~40k-row training set is expensive
+(`textrecipes` re-tokenizes for every distinct TF-IDF configuration), so we
+tune on a stratified subsample and then refit the chosen configuration on the
+**full** training set. Increase `TUNE_SAMPLE_N` (up to `nrow(train_df)`) for a
+more thorough search when you have the compute/time.
+
+XGBoost itself runs multi-threaded (`nthread` is set on the engine above),
+which is where the real speedup comes from; we deliberately don't add an
+outer parallel backend on top, since nesting the two tends to oversubscribe
+cores without helping.
 
 The folds reuse `cv_folds()` (seed 42, stratified 5-fold) so the evaluation is
 consistent with the rest of the project. Results are cached to
@@ -130,7 +142,7 @@ consistent with the rest of the project. Results are cached to
 
 ```{r}
 #| label: tuning
-TUNE_SAMPLE_N <- 8000L
+TUNE_SAMPLE_N <- 2500L
 
 tune_train <- if (TUNE_SAMPLE_N < nrow(train_df)) {
   set.seed(42)
@@ -150,14 +162,6 @@ if (file.exists(tune_path)) {
   tune_res <- readRDS(tune_path)
   message("Loaded cached tuning results from ", tune_path)
 } else {
-  # XGBoost already uses multiple threads per fit; parallelize across resamples
-  # too if doParallel is available.
-  if (requireNamespace("doParallel", quietly = TRUE)) {
-    cl <- parallel::makePSOCKcluster(max(1, parallel::detectCores() - 1))
-    doParallel::registerDoParallel(cl)
-    on.exit(parallel::stopCluster(cl), add = TRUE)
-  }
-
   tune_res <- tune::tune_grid(
     tune_wf,
     resamples = folds,
@@ -279,8 +283,8 @@ tibble(
 #| label: compare-untuned
 # Baseline: the recipe/model settings used in 04-model-comparison.qmd
 baseline_rec <- tfidf_recipe(generated ~ text, data = train_df, max_tokens = 1000)
-baseline_spec <- boost_tree(trees = 500, learn_rate = 0.05) |>
-  set_engine("xgboost") |>
+baseline_spec <- boost_tree(trees = 300, learn_rate = 0.05) |>
+  set_engine("xgboost", nthread = parallel::detectCores()) |>
   set_mode("classification")
 
 baseline_fit <- workflow() |>
